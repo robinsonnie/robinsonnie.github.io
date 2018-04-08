@@ -64,10 +64,21 @@ struct ngx_cycle_s {
 
 * 调用ngx_conf_parse(&conf, &cycle->conf_file)，开始解析配置文件。
     * 遇到directive时，遍历所有模块以确保哪个模块支持此directive，并回调相应ngx_command_t::set()方法。
+
     * 遇到event{}时：
         * 解析event{}配置前：所有NGX_EVENT_MODULE类型的模块，调用其m->ctx成员（ngx_event_module_t）的create_conf()创建各自模块所需的上下文，并由cycle->conf_ctx[ngx_events_module.index][m->ctx_index]指向各自模块所创建的上下文。
         * 调用ngx_conf_parse(&conf, NULL)，开始解析event{}配置块。
         * 解析event{}配置后：所有NGX_EVENT_MODULE类型的模块，调用其m->ctx成员（ngx_event_module_t）的init_conf()初始化各自模块的上下文。
+
+    * 遇到http{}时：
+        * 解析http{}配置前：所有NGX_HTTP_MODULE类型的模块，调用其m->ctx成员（ngx_http_module_t）的main_conf/srv_conf/loc_conf创建上下文：
+           * create_main_conf()创建的上下文，由cycle->conf_ctx[ngx_http_module.index]->main_conf[m->ctx_index]存储。
+           * create_srv_conf()创建的上下文，由cycle->conf_ctx[ngx_http_module.index]->srv_conf[m->ctx_index]存储。
+           * create_loc_conf()创建的上下文，由cycle->conf_ctx[ngx_http_module.index]->loc_conf[m->ctx_index]存储。
+        * 解析http{}配置前：所有NGX_HTTP_MODULE类型的模块，调用其m->ctx成员(ngx_http_module_t)的preconfiguration()，此阶段用于创建nginx变量，例如：limit_rate。
+        * 调用ngx_conf_parse(&conf, NULL)，开始解析http{}配置块。
+           * 遇到server{}时：
+              * 
 
 * 解析配置后：所有NGX_CORE_MODULE类型的模块，调用其m->ctx成员（ngx_core_module_t）的init_conf()初始化各自模块的上下文：特别是针对回调set的directive，在上下文中设置其缺省值。
 ```

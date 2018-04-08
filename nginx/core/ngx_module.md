@@ -33,8 +33,15 @@ struct ngx_module_s {
     void                 *ctx;        // 指向本模块的模块上下文结构体，不同类型的模块上下文结构体均不相同。
                                       // 上下文结构体的作用：创建、初始化上下文，存储本模块执行所需的上下文信息，通常包含本模块所支持的directive的配置情况。
                                       // NGX_CORE_MODULE的上下文类型为ngx_core_module_t
+                                      // NGX_EVENT_MODULE的上下文类型为ngx_event_module_t
+                                      // NGX_HTTP_MODULE的上下文类型为ngx_http_module_t
+                                      
     ngx_command_t        *commands;   // 定义本模块支持的配置关键字
-    ngx_uint_t            type;       // 定义本模块的模块类型：NGX_CORE_MODULE、NGX_CONF_MODULE、NGX_EVENT_MODULE、NGX_HTTP_MODULE
+    ngx_uint_t            type;       // 定义本模块的模块类型：
+                                      // NGX_CORE_MODULE、
+                                      // NGX_CONF_MODULE、
+                                      // NGX_EVENT_MODULE、
+                                      // NGX_HTTP_MODULE
 
     ngx_int_t           (*init_master)(ngx_log_t *log);
 

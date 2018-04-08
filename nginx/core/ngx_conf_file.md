@@ -95,6 +95,7 @@ struct ngx_conf_s {
     // 解析配置文件的过程中：ctx指明上下文 | module_type指明正在解析哪级模块支持的指令 | cmd_type指明正在解析何位置的指令
     // 解析NGX_CORE_MODULE指令：cycle->conf_ctx | NGX_CORE_MODULE | NGX_MAIN_CONF
     // 解析NGX_EVENT_MODULE指令：cycle->conf_ctx[ngx_events_module.index] | NGX_EVENT_MODULE | NGX_EVENT_CONF
+    // 解析NGX_HTTP_MODULE指令：cycle->conf_ctx[ngx_http_module.index] | NGX_HTTP_MODULE | NGX_HTTP_MAIN_CONF
     void                 *ctx; 
     ngx_uint_t            module_type;
     ngx_uint_t            cmd_type;
