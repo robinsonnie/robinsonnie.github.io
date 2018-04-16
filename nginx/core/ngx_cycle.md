@@ -56,6 +56,10 @@ struct ngx_cycle_s {
 
 ## 二、全局变量/常量
 
+```
+volatile ngx_cycle_t  *ngx_cycle;
+```
+
 ## 三、执行流
 * init_cycle
 
