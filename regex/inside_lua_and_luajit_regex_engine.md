@@ -58,12 +58,14 @@ typedef struct MatchState {
 } MatchState;
 
 #define MAXCCALLS   200
+#define LUA_MAXCAPTURES     32
 #define L_ESC       '%'
 #define SPECIALS    "^$*+?.([%-"
 ```
 
 * MatchState是NFA状态机，每次进行一次string.match()时，均会生成一个MatchState对象，用于记录NFA分析过程的状态。
 * 在多选结构（```例如：a|b 表示a或者b```）、量词（```例如：a*b 表示0个或多个a后，紧跟着一个b```）的匹配过程中，均会涉及尝试、当尝试失败后的回溯至原位置、继续下一尝试。稍后源码分析会看到，尝试-回溯本质是一次递归调用，当出现一直尝试的情况下，可能会造成C堆栈溢出，故matchdepth记录的递归次数不得超过MAXCCALLS。
+* LUA_MAXCAPTURES定义了使用```()```进行模式提取的上限。
 * 与很多其它正则流派使用```\```转义不同，Lua/Luajit使用```%```进行转义，L_ESC定义方便后续引用。
 * SPECIALS定义了Lua/Luajit正则引擎支持的元字符，可以看到，不支持多选结构```|```，是个比较严重的硬伤，但可以通过其它方法弥补。
 
@@ -107,6 +109,7 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
   init: /* using goto's to optimize tail recursion */
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
+       ... 后续讲解中不断扩充 ...
     }  
   }
   ms->matchdepth++;
@@ -117,6 +120,7 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
 * ms->matchdepth用于控制迭代次数不超过MAXCCALLS(200)的限制。
    * NFA中的尝试 - 回溯，在Lua/Luajit中的实现，正是一次对match()自身的递归调用，当失败后，回溯到调用前的C堆栈位置，继续其它尝试。
    * MAXCCALLS的限制，从正则角度来看，可以避免过于复杂的正则表达式。 
+* match()函数的主体是以正则表达式自身进行驱动，通过switch()驱动不同匹配逻辑的执行，这种行为是**NFA引擎**的一个特征。
 
 ### 匹配单独字符
 
@@ -127,6 +131,9 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
   init: /* using goto's to optimize tail recursion */
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
+      
+      ... 后续讲解中不断扩充 ...
+           
       default: dflt: {
         const char *ep = classend(ms, p);  /* points to optional suffix */
         /* does not match at least once? */
@@ -255,6 +262,9 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
   init: /* using goto's to optimize tail recursion */
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
+    
+      ... 后续讲解中不断扩充 ...
+
       default: dflt: {
         const char *ep = classend(ms, p);  /* points to optional suffix */
         /* does not match at least once? */
@@ -303,12 +313,190 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
    * ```*``` : 控制前导元素出现0次或多次（贪婪模式，也叫最长匹配模式）
    * ```-``` : 控制前导元素出现0次或多次（懒惰模式，也叫最短匹配模式）
   
-* 当单独字符匹配成功后，会查看该字符后是否有量词出现：
-   * 若单独字符后为```?```，则调用match()尝试对下一个字符进行匹配，即以前导元素出现1次进行尝试
+* 当单独字符匹配成功后，会查看该字符后是否有量词控制：
+   * 若单独字符后为```?```，则调用match()尝试对下一个字符进行匹配，即以前导元素出现1次继续尝试
       * 若尝试成功，则记录匹配结果并返回
       * 若尝试失败，则回溯至调用前的状态，即正则引擎会以前导元素出现0次继续进行匹配。
-      * ***这是第1次看到正则引擎的 尝试 - 回溯 机制，```?```至多进行1次回溯，但其它量词、特别是多个量词叠加，存在引起指数级回溯的很大风险，将CPU Hang住***
+      * ***这是第1次看到正则引擎的 尝试 - 回溯 机制，```?```至多进行1次回溯，但其它量词、特别是多个量词叠加，存在引起指数级回溯的风险***
    * 若单独字符后为```+```，则继续对下一个字符进行最长匹配
    * 若单独字符后为```*```，则调用max_expand()进行最长匹配
    * 若单独字符后为```-```，则调用min_expand()进行最短匹配
    * 若单独字符后无量词出现，则继续向后匹配。
+
+```
+static const char *max_expand (MatchState *ms, const char *s,
+                                 const char *p, const char *ep) {
+  ptrdiff_t i = 0;  /* counts maximum expand for item */
+  while (singlematch(ms, s + i, p, ep))
+    i++;
+  /* keeps trying to match with the maximum repetitions */
+  while (i>=0) {
+    const char *res = match(ms, (s+i), ep+1);
+    if (res) return res;
+    i--;  /* else didn't match; reduce 1 repetition to try again */
+  }
+  return NULL;
+}
+```
+* max_expand()实现了贪婪模式（最长匹配模式）
+  *  第1个while循环实现了贪婪模式。
+  *  第2个while循环实现了贪婪模式完成后的继续向后匹配，请注意这里的尝试-回溯机制：
+     * 当后续匹配成功时，直接返回结果
+     * 当后续匹配失败时，需将量词先前匹配成功的字符从后向前依次吐出，以继续尝试向后匹配。 
+  *  例如：
+
+```
+正则表达式:                         b*c
+目标字符串:                         bbbbbbbbbbb
+第1个while循环，完成贪婪模式匹配:      ..........^
+第2个while循环继续向后匹配，由于当前目标字符串位置无法向后匹配成功，则量词先前匹配成功的字符从后向前依次吐出，进行尝试-回溯机制。
+                         .........^
+                         ........^
+                         .......^
+                         ......^
+                         .....^
+                         ....^
+                         ...^
+                         ..^
+                         .^
+                         ^
+当量词先前匹配成功的字符全部吐出，仍尝试失败，则此轮正则匹配失败。
+```
+
+```
+static const char *min_expand (MatchState *ms, const char *s,
+                                 const char *p, const char *ep) {
+  for (;;) {
+    const char *res = match(ms, s, ep+1);
+    if (res != NULL)
+      return res;
+    else if (singlematch(ms, s, p, ep))
+      s++;  /* try with one more repetition */
+    else return NULL;
+  }
+}
+```
+* min_expand()实现了懒惰模式（最短匹配模式）
+   * 与贪婪模式相反，懒惰模式始终优先进行向后匹配，且仅当向后匹配失败，才回溯尝试量词匹配，且一旦量词匹配成功后，继续优先进行向后匹配。
+
+### 模式提取
+```
+static const char *match (MatchState *ms, const char *s, const char *p) {
+  if (ms->matchdepth-- == 0)
+    luaL_error(ms->L, "pattern too complex");
+  init: /* using goto's to optimize tail recursion */
+  if (p != ms->p_end) {  /* end of pattern? */
+    switch (*p) {
+    
+      case '(': {  /* start capture */
+        if (*(p + 1) == ')')  /* position capture? */
+          s = start_capture(ms, s, p + 2, CAP_POSITION);
+        else
+          s = start_capture(ms, s, p + 1, CAP_UNFINISHED);
+        break;
+      }
+      case ')': {  /* end capture */
+        s = end_capture(ms, s, p + 1);
+        break;
+      }
+      case L_ESC: {  /* escaped sequences not in the format class[*+?-]? */
+        switch (*(p + 1)) {
+          case '0': case '1': case '2': case '3':
+          case '4': case '5': case '6': case '7':
+          case '8': case '9': {  /* capture results (%0-%9)? */
+            s = match_capture(ms, s, uchar(*(p + 1)));
+            if (s != NULL) {
+              p += 2; goto init;  /* return match(ms, s, p + 2) */
+            }
+            break;
+          }
+          default: goto dflt;
+        }
+        break;
+      }
+      
+      ... 忽略 ...
+    }
+  }
+  ms->matchdepth++;
+  return s;
+}
+```
+
+* 当正则表达式的当前字符为```(```，调用start_capture()开始模式提取
+* 当正则表达式的当前字符为```)```，调用end_capture()完成模式提取
+* 当正则表达式的当前字符为```%0 - %9```，调用match_capture()引用相应提取结果，以对目标字符串进行匹配
+* 如下为上述3个函数：
+
+```
+static const char *start_capture (MatchState *ms, const char *s,
+                                    const char *p, int what) {
+  const char *res;
+  int level = ms->level;
+  if (level >= LUA_MAXCAPTURES) luaL_error(ms->L, "too many captures");
+  ms->capture[level].init = s;
+  ms->capture[level].len = what;
+  ms->level = level+1;
+  if ((res=match(ms, s, p)) == NULL)  /* match failed? */
+    ms->level--;  /* undo capture */
+  return res;
+}
+
+```
+* 至多保存LUA_MAXCAPTURES（32）个模式提取结果。
+* 开始模式提取时：
+   * ms->capture[level].init = 指向目标字符串的当前位置
+   * ms->capture[level].len = 标记匹配长度，未完成匹配时使用CAP_UNFINISHED标识
+* 递归调用match()，依据```(..)```进行模式提取，直至遇到```(```回调调用end_capture.
+
+```
+static const char *end_capture (MatchState *ms, const char *s,
+                                  const char *p) {
+  int l = capture_to_close(ms);
+  const char *res;
+  ms->capture[l].len = s - ms->capture[l].init;  /* close capture */
+  if ((res = match(ms, s, p)) == NULL)  /* match failed? */
+    ms->capture[l].len = CAP_UNFINISHED;  /* undo capture */
+  return res;
+}
+```
+* 完成模式提取时：
+   * ms->capture[level].len = 更新为匹配长度
+* 递归调用match()，进行后续匹配。
+
+```
+static const char *match_capture (MatchState *ms, const char *s, int l) {
+  size_t len;
+  l = check_capture(ms, l);
+  len = ms->capture[l].len;
+  if ((size_t)(ms->src_end-s) >= len &&
+      memcmp(ms->capture[l].init, s, len) == 0)
+    return s+len;
+  else return NULL;
+}
+```
+* 根据l指定的提取序号（%0-%9），引用相应的内容对目标字符串进行匹配，成功时目标字符串进行步进，继续向后匹配。
+
+## 总结
+从代码层面出现，本文分析了Lua/Luajit正则引擎实现的要点：
+
+* NFA状态机数据结构
+* 传动装置
+* 单独字符匹配
+   * ```%转义字符```
+   * ```[]```字符组
+   * ```[^]```排除字符组
+* 量词支持
+   * 贪婪模式（最长优先匹配）
+   * 懒惰模式（最短优先匹配）
+* 模式提取
+   * 反向引用
+* 理解NFA正则引擎的尝试-回溯机制实现
+
+后续值得去做得事件：
+
+* NFA引擎的正则表达式复杂度识别，应用场景
+   * 回归测试：在测试阶段，识别出存在性能问题的正则，扼杀于上线前。
+   * 多租户计算环境：同上。
+* 实现一个无需回溯算法支持的NFA引擎，即提取NFA的多种功能，又避免了潜在性能问题。
+   * https://github.com/openresty/sregex
