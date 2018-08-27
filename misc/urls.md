@@ -18,3 +18,7 @@
 # 编译技术
 [DSL观点](http://www.yinwang.org/blog-cn/2017/05/25/dsl)
 [DSL编程技术介绍](https://www.jianshu.com/p/17266c5b8d1c)
+
+# 区块链
+[精通比特币（第二版）](http://book.8btc.com/masterbitcoin2cn)
+[巴比特区块链图书专题](http://book.8btc.com/e_book)
