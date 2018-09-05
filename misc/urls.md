@@ -35,3 +35,4 @@
 # lua
 [探索Lua5.2内部实现](https://blog.csdn.net/yuanlin2008/article/category/1307277)
 [云风博客的lua分类](https://blog.codingnow.com/eo/luaoeeeaeau/)
+[lua源码欣赏](http://vdisk.weibo.com/s/BYWEiE6TB8c9T?from=page_100505_profile&wvr=6)
